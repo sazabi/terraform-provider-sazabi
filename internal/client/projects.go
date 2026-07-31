@@ -60,3 +60,20 @@ func (c *Client) GetProject(ctx context.Context, projectID string) (*Project, er
 	}
 	return &out.Project, nil
 }
+
+// UpdateProject calls projects.update (PATCH /projects/{projectId}),
+// which is rename-only: name is the sole mutable field.
+func (c *Client) UpdateProject(ctx context.Context, projectID, name string) (*Project, error) {
+	var out projectEnvelope
+	body := map[string]string{"name": name}
+	if err := c.Do(ctx, http.MethodPatch, "/projects/"+projectID, nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out.Project, nil
+}
+
+// DeleteProject calls projects.delete (DELETE /projects/{projectId}, 204).
+// The API rejects deleting an organization's last active project.
+func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
+	return c.Do(ctx, http.MethodDelete, "/projects/"+projectID, nil, nil, nil)
+}

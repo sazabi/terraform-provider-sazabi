@@ -41,9 +41,11 @@ func testAccPreCheck(t *testing.T) {
 	}
 }
 
-// TestAccProjectResource exercises create, read, and import against a real
-// sandbox organization. Projects cannot be deleted via the API, so destroy
-// only removes state — expect the sandbox org to accumulate test projects.
+// TestAccProjectResource exercises the full CRUD cycle — create, read,
+// rename in place, import, and soft-delete on destroy — against a real
+// sandbox organization. Requires projects.update/.delete (monorepo PR
+// #12366) to be deployed, and the sandbox org must have at least one other
+// active project (the API rejects deleting the last one).
 func TestAccProjectResource(t *testing.T) {
 	name := fmt.Sprintf("tf-acc-test-%s", acctest.RandStringFromCharSet(8, acctest.CharSetAlphaNum))
 
@@ -62,6 +64,16 @@ resource "sazabi_project" "test" {
 					testresource.TestCheckResourceAttrSet("sazabi_project.test", "organization_id"),
 					testresource.TestCheckResourceAttr("sazabi_project.test", "name", name),
 					testresource.TestCheckResourceAttr("sazabi_project.test", "region", "us-west-2"),
+				),
+			},
+			{
+				Config: fmt.Sprintf(`
+resource "sazabi_project" "test" {
+  name = %q
+}
+`, name+"-renamed"),
+				Check: testresource.ComposeAggregateTestCheckFunc(
+					testresource.TestCheckResourceAttr("sazabi_project.test", "name", name+"-renamed"),
 				),
 			},
 			{

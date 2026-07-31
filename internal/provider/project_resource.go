@@ -16,14 +16,13 @@ import (
 	"github.com/sazabi/terraform-provider-sazabi/internal/client"
 )
 
-// projectResource implements sazabi_project.
+// projectResource implements sazabi_project as a full-CRUD resource.
 //
-// The public API supports create and read only (projects.create,
-// projects.get) — there is no update or delete endpoint. Every attribute
-// therefore requires replacement, and Delete only removes the project from
-// Terraform state with a loud warning; the underlying project keeps running.
-// This models the API's real CRUD surface instead of stubbing missing
-// operations (the partial-CRUD-honesty decision in the design).
+// projects.update (added in monorepo PR #12366, closing the design's
+// project update/delete gap) is rename-only, so name updates in place while
+// organization_id and region still require replacement. projects.delete is
+// a soft delete with a full cascade; the API rejects deleting an
+// organization's last active project.
 type projectResource struct {
 	providerData *ProviderData
 }
@@ -52,9 +51,9 @@ func (r *projectResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *projectResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A Sazabi project. The public API supports create and read only: " +
-			"projects cannot be renamed or deleted via Terraform, so every change requires replacement, " +
-			"and destroy only removes the project from state (the project itself keeps running).",
+		Description: "A Sazabi project. Renaming updates in place; organization and region are immutable and " +
+			"require replacement. Destroy soft-deletes the project — the API rejects deleting an organization's " +
+			"last active project.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -74,12 +73,9 @@ func (r *projectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			},
 			"name": schema.StringAttribute{
 				Required:    true,
-				Description: "Project name (≤100 characters; letters, numbers, spaces, hyphens, underscores). Changing it requires replacement — the API has no rename.",
+				Description: "Project name (≤100 characters; letters, numbers, spaces, hyphens, underscores).",
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 100),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"region": schema.StringAttribute{
@@ -158,14 +154,22 @@ func (r *projectResource) Read(ctx context.Context, req resource.ReadRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, projectModelFromAPI(project))...)
 }
 
-func (r *projectResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {
-	// Unreachable: every mutable attribute is marked RequiresReplace because
-	// the public API has no project update endpoint.
-	resp.Diagnostics.AddError(
-		"Projects cannot be updated",
-		"The Sazabi public API has no project update endpoint; all changes require replacement. "+
-			"This plan reaching Update is a bug in the provider.",
-	)
+func (r *projectResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan projectResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// projects.update is rename-only; organization_id and region are marked
+	// RequiresReplace, so name is the only attribute that can reach here.
+	project, err := r.providerData.Client.UpdateProject(ctx, plan.ID.ValueString(), plan.Name.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Failed to rename project", err.Error())
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.Set(ctx, projectModelFromAPI(project))...)
 }
 
 func (r *projectResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -175,14 +179,14 @@ func (r *projectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	resp.Diagnostics.AddWarning(
-		"Project not deleted from Sazabi",
-		fmt.Sprintf(
-			"The Sazabi public API has no project delete endpoint. Project %q (%s) was removed from Terraform state only and keeps running in Sazabi. "+
-				"Delete it from the dashboard if you want it gone.",
-			state.Name.ValueString(), state.ID.ValueString(),
-		),
-	)
+	if err := r.providerData.Client.DeleteProject(ctx, state.ID.ValueString()); err != nil {
+		if client.IsNotFound(err) {
+			return
+		}
+		// The API rejects deleting the organization's last active project;
+		// surface that as-is rather than removing state for a live project.
+		resp.Diagnostics.AddError("Failed to delete project", err.Error())
+	}
 }
 
 func (r *projectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
