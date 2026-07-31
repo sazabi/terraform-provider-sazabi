@@ -154,5 +154,8 @@ func (p *SazabiProvider) Resources(_ context.Context) []func() resource.Resource
 }
 
 func (p *SazabiProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{}
+	return []func() datasource.DataSource{
+		NewIntegrationConnectionDataSource,
+		NewMcpConnectorDataSource,
+	}
 }
