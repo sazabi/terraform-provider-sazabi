@@ -1,0 +1,44 @@
+# Acceptance tests against a real Sazabi sandbox organization.
+#
+# Runs on manual dispatch and a nightly schedule — NOT on every PR, so a
+# shared sandbox org isn't hammered by concurrent runs and PR CI stays
+# hermetic. Requires repo secrets: SAZABI_API_KEY, SAZABI_ORGANIZATION_ID,
+# SAZABI_TEST_PROJECT_ID (a persistent project for status-component tests
+# and the last-active-project delete guard).
+#
+# Known-failing until the public API opens these to secret-key auth
+# (allowedCredentialTypes ["user"] today): projects.create (TestAccProjectResource)
+# and all /secret-keys operations (TestAccAPIKeyResource).
+name: Acceptance
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * *" # daily, 09:17 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-sandbox-org
+  cancel-in-progress: false
+
+jobs:
+  testacc:
+    name: Acceptance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: go test ./internal/provider/ -v -run TestAcc -timeout 30m
+        env:
+          TF_ACC: "1"
+          SAZABI_API_KEY: ${{ secrets.SAZABI_API_KEY }}
+          SAZABI_ORGANIZATION_ID: ${{ secrets.SAZABI_ORGANIZATION_ID }}
+          SAZABI_TEST_PROJECT_ID: ${{ secrets.SAZABI_TEST_PROJECT_ID }}
