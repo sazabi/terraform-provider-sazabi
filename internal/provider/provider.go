@@ -142,7 +142,9 @@ func (p *SazabiProvider) Configure(ctx context.Context, req provider.ConfigureRe
 }
 
 func (p *SazabiProvider) Resources(_ context.Context) []func() resource.Resource {
-	return []func() resource.Resource{}
+	return []func() resource.Resource{
+		NewProjectResource,
+	}
 }
 
 func (p *SazabiProvider) DataSources(_ context.Context) []func() datasource.DataSource {
