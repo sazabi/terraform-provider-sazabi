@@ -4,11 +4,11 @@
 # shared sandbox org isn't hammered by concurrent runs and PR CI stays
 # hermetic. Requires repo secrets: SAZABI_API_KEY, SAZABI_ORGANIZATION_ID,
 # SAZABI_TEST_PROJECT_ID (a persistent project for status-component tests
-# and the last-active-project delete guard).
+# and the last-active-project delete guard), and SAZABI_API_BASE_URL.
 #
-# Known-failing until the public API opens these to secret-key auth
-# (allowedCredentialTypes ["user"] today): projects.create (TestAccProjectResource)
-# and all /secret-keys operations (TestAccAPIKeyResource).
+# The sandbox org lives in the development environment
+# (api.development.sazabi.dev), where merged public API changes land first
+# via auto-deploy — production would lag behind on newly added endpoints.
 name: Acceptance
 
 on:
@@ -42,3 +42,4 @@ jobs:
           SAZABI_API_KEY: ${{ secrets.SAZABI_API_KEY }}
           SAZABI_ORGANIZATION_ID: ${{ secrets.SAZABI_ORGANIZATION_ID }}
           SAZABI_TEST_PROJECT_ID: ${{ secrets.SAZABI_TEST_PROJECT_ID }}
+          SAZABI_API_BASE_URL: ${{ secrets.SAZABI_API_BASE_URL }}
