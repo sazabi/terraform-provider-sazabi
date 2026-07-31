@@ -148,6 +148,8 @@ func (p *SazabiProvider) Resources(_ context.Context) []func() resource.Resource
 		NewAPIKeyResource,
 		NewDataSourceConnectionResource,
 		NewDataSourceStreamResource,
+		NewAutomationResource,
+		NewPublicKeyLogForwardingResource,
 	}
 }
 
