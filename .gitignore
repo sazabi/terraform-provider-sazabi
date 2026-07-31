@@ -1,0 +1,15 @@
+# Build artifacts
+terraform-provider-sazabi
+dist/
+
+# Terraform local state from example/manual runs
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
