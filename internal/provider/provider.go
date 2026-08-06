@@ -145,6 +145,7 @@ func (p *SazabiProvider) Resources(_ context.Context) []func() resource.Resource
 	return []func() resource.Resource{
 		NewProjectResource,
 		NewStatusComponentResource,
+		NewScriptResource,
 		NewAPIKeyResource,
 		NewDataSourceConnectionResource,
 		NewDataSourceStreamResource,
