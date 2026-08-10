@@ -3,7 +3,7 @@
 # Runs on manual dispatch and a nightly schedule — NOT on every PR, so a
 # shared sandbox org isn't hammered by concurrent runs and PR CI stays
 # hermetic. Requires repo secrets: SAZABI_API_KEY, SAZABI_ORGANIZATION_ID,
-# SAZABI_TEST_PROJECT_ID (a persistent project for status-component tests
+# SAZABI_TEST_PROJECT_ID (a persistent project for component tests
 # and the last-active-project delete guard), and SAZABI_API_BASE_URL.
 #
 # The sandbox org lives in the development environment

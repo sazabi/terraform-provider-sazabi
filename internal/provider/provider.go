@@ -144,7 +144,7 @@ func (p *SazabiProvider) Configure(ctx context.Context, req provider.ConfigureRe
 func (p *SazabiProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewProjectResource,
-		NewStatusComponentResource,
+		NewComponentResource,
 		NewScriptResource,
 		NewAPIKeyResource,
 		NewDataSourceConnectionResource,
