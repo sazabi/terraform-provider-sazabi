@@ -1,10 +1,10 @@
 # Terraform Provider for Sazabi
 
-Declare Sazabi platform configuration — projects, components, API keys, data source connections, scripts, and scheduled automations — as code, backed by the [Sazabi public API](https://api.sazabi.com).
+Declare Sazabi platform configuration — projects, components, API keys, log source connections, scripts, and scheduled automations — as code, backed by the [Sazabi public API](https://api.sazabi.com).
 
-> **Status: pre-release.** Private repo, not yet published to the Terraform Registry.
+> **Source model:** The provider's Go source is maintained in Sazabi's private monorepo. This repository distributes the provider as **pre-built, signed binaries only** via the [Terraform Registry](https://registry.terraform.io/providers/sazabi/sazabi/latest). There is no publicly visible Go source here.
 
-## Configuration
+## Installation
 
 ```hcl
 terraform {
@@ -23,21 +23,21 @@ provider "sazabi" {
 }
 ```
 
-The `api_key` is a Sazabi **secret key** (`sazabi_secret_...`), created in the dashboard under Settings → API Keys or via the `sazabi_api_key` resource. Auth precedence mirrors the CLI: explicit provider block, then environment variable, then a clear failure. The provider is non-interactive by design — no OAuth login path.
+The `api_key` is a Sazabi **secret key** (`sazabi_secret_...`), created in the dashboard under Settings → API Keys or via the `sazabi_api_key` resource. Auth precedence mirrors the CLI: explicit provider block, then environment variable, then a clear failure. The provider is non-interactive — no OAuth login path.
 
 ## Resources and data sources
 
-Every resource maps 1:1 to public API operations defined in `packages/public-api-contracts` (in `sazabi/monorepo`) — the provider never models capability the API does not have. Partial-CRUD concepts expose exactly the subset the API supports; OAuth-backed concepts ship as read-only `data` sources.
+Every resource maps 1:1 to public API operations. Partial-CRUD concepts expose exactly the subset the API supports; OAuth-backed concepts ship as read-only `data` sources.
 
 | Name | Kind | CRUD surface | Notes |
 |------|------|--------------|-------|
-| `sazabi_project` | resource | Full CRUD | Update is rename-only; `organization_id`/`region` force replacement. Delete rejects the org's last active project. Requires `projects.update`/`.delete` (monorepo #12366) deployed. |
+| `sazabi_project` | resource | Full CRUD | Update is rename-only; `organization_id`/`region` force replacement. Delete rejects the org's last active project. |
 | `sazabi_component` | resource | Register / deregister | Register is an upsert by name — creating an existing name adopts it. Re-register updates the description; clearing it forces replacement. Destroy soft-deletes. |
 | `sazabi_api_key` | resource | Full CRUD | Plaintext `value` returned once at create, stored sensitive in state; empty on import. |
-| `sazabi_data_source_connection` | resource | Create / read / delete | No update endpoint: credential rotation is destroy-and-recreate. `metadata` is a sensitive `map(string)`, write-only server-side (never drift-checked). |
+| `sazabi_data_source_connection` | resource | Create / read / delete | No update endpoint: credential rotation is destroy-and-recreate. `metadata` is a sensitive `map(string)`, write-only server-side. |
 | `sazabi_data_source_stream` | resource | Create / read / delete | Async provisioning; volatile status fields not tracked. Some sources mint a one-time per-stream `public_key`. |
-| `sazabi_script` | resource | Full CRUD | A durable bash script keyed by name within a project (`scripts.create/.get/.update/.delete`). Renaming forces replacement; destroy soft-deletes. |
-| `sazabi_automation` | resource | Create / read / update + enable/disable | Creates a scheduled automation that runs a `sazabi_script` on a cron schedule. Name/description/schedule update in place; the script it runs is immutable (forces replacement). The public API has no delete-automation operation, so destroy **disables** the automation and removes it from state — it is not deleted server-side. **Breaking change** from the previous toggle-only resource (see below). |
+| `sazabi_script` | resource | Full CRUD | A durable bash script keyed by name within a project. Renaming forces replacement; destroy soft-deletes. |
+| `sazabi_automation` | resource | Create / read / update + enable/disable | Scheduled automation that runs a `sazabi_script` on a cron schedule. Name/description/schedule update in place; the script it runs is immutable (forces replacement). The public API has no delete-automation operation, so destroy **disables** the automation and removes it from state — it is not deleted server-side. |
 | `sazabi_public_key_log_forwarding` | resource | Ensure / deactivate | Upsert keyed by project; plaintext value recoverable on every apply. Destroy soft-disables. |
 | `data.sazabi_integration_connection` | data source | Read-only | Integrations connect via interactive OAuth, which Terraform cannot drive. |
 | `data.sazabi_mcp_connector` | data source | Read-only | Same OAuth constraint. |
@@ -81,7 +81,7 @@ resource "sazabi_script" "nightly_report" {
 resource "sazabi_automation" "nightly_status_report" {
   project_id      = sazabi_project.production.id
   name            = "nightly-status-report"
-  script          = sazabi_script.nightly_report.name # or script_id = sazabi_script.nightly_report.id
+  script          = sazabi_script.nightly_report.name
   cron_expression = "17 9 * * *"
   timezone        = "UTC"
   timeout_seconds = 60
@@ -93,71 +93,34 @@ Every resource supports `terraform import`. Most import by ID; `sazabi_script` i
 
 ### Breaking change: `sazabi_status_component` is now `sazabi_component`
 
-Sazabi renamed "status components" to plain **components** across the platform (API paths moved from `/status-components*` to `/components*`, monorepo #13275). The resource type follows: `sazabi_status_component` → `sazabi_component`, same schema and behavior, no aliases. `terraform state mv` cannot move state across resource types, so existing configurations rename the type in HCL, drop the old state entry, and re-import (register is an upsert by name, so a plain apply without import also just adopts the existing component instead of duplicating it):
+Sazabi renamed "status components" to plain **components** across the platform. The resource type follows: `sazabi_status_component` → `sazabi_component`, same schema and behavior, no aliases. `terraform state mv` cannot move state across resource types, so existing configurations rename the type in HCL, drop the old state entry, and re-import:
 
 ```sh
 terraform state rm 'sazabi_status_component.example'
 terraform import 'sazabi_component.example' <component-id>
 ```
 
-Older provider versions keep working only against API deployments that still serve `/status-components*`; once the platform rename is deployed to your environment, upgrade the provider and rename in the same change.
-
 ### Breaking change: `sazabi_automation` is now full CRUD
 
-Automations are now CLI-first: the public API exposes create/read/update plus enable/disable for automations, and full CRUD for the durable scripts they run (`sazabi_script`). The provider previously modeled only the enable/disable toggle, adopting an existing automation by a required `automation_id`. That resource has been reworked into a full-CRUD resource that **creates and owns** the automation:
+The previous resource modeled only an enable/disable toggle, adopting an existing automation by a required `automation_id`. That resource has been reworked into a full-CRUD resource that **creates and owns** the automation:
 
 - `automation_id` is **removed**. The automation is created by Terraform; its server-assigned ID is the computed `id`.
-- New required/optional config: `name`, `script` **xor** `script_id` (the `sazabi_script` to run), `cron_expression`, `timezone`, `timeout_seconds`, `enabled`, `description`. Server defaults apply when omitted (cron every minute, UTC, 60s timeout, enabled).
-- The script an automation runs is immutable per the API's update contract — changing `script`/`script_id` forces replacement. Name, description, and schedule update in place.
-- **Destroy disables, it does not delete.** The public API has no delete-automation operation, so `terraform destroy` disables the automation and drops it from state; it continues to exist (paused) in Sazabi. Remove it from the dashboard or with the `sazabi` CLI to delete it entirely.
+- New required/optional config: `name`, `script` **xor** `script_id`, `cron_expression`, `timezone`, `timeout_seconds`, `enabled`, `description`.
+- The script an automation runs is immutable per the API's update contract — changing `script`/`script_id` forces replacement.
+- **Destroy disables, it does not delete.** The public API has no delete-automation operation.
 
-To keep managing an automation that was previously adopted by `automation_id`, drop the old resource from state (`terraform state rm`) and re-import it into the new resource by its ID (`terraform import sazabi_automation.example <automation-id>`), or recreate the script + automation in HCL.
+To keep managing an automation that was previously adopted by `automation_id`, drop the old resource from state and re-import it into the new resource by its ID, or recreate the script + automation in HCL.
 
-## Development
+## Releases
 
-Requires Go (see `go.mod` for the version; use `mise exec go@<version> --` if you manage toolchains with mise).
+Releases are published to the [Terraform Registry](https://registry.terraform.io/providers/sazabi/sazabi/latest) as signed binaries. Each GitHub release in this repository contains the binary archives and the GPG signature file — no Go source is included.
 
-```sh
-make build   # compile the provider
-make test    # unit tests (no network, no credentials)
-make testacc # acceptance tests — see below
-make lint    # gofmt + go vet
-make fmt     # gofmt -w
-```
+Binaries are signed with Sazabi's GPG key. The Terraform Registry verifies signatures automatically; no manual verification step is needed for normal `terraform init` usage.
 
-### Acceptance tests
+## Support and feedback
 
-Acceptance tests exercise a **real Sazabi organization** — use a dedicated sandbox org, never a customer or production org.
+For questions, bug reports, or feature requests, contact [support@sazabi.ai](mailto:support@sazabi.ai).
 
-```sh
-export SAZABI_API_KEY=sazabi_secret_...        # sandbox org secret key
-export SAZABI_ORGANIZATION_ID=...              # sandbox org
-export SAZABI_TEST_PROJECT_ID=...              # existing project, for component tests
-make testacc                                   # sets TF_ACC=1
-```
+## License
 
-The sandbox org should keep at least one persistent project beyond what tests create: the API rejects deleting an organization's last active project.
-
-### Local provider override
-
-To run an unreleased build against real Terraform configs, use a [dev override](https://developer.hashicorp.com/terraform/cli/config/config-file#development-overrides-for-provider-developers) in `~/.terraformrc`:
-
-```hcl
-provider_installation {
-  dev_overrides {
-    "sazabi/sazabi" = "/path/to/terraform-provider-sazabi"  # directory containing the built binary
-  }
-  direct {}
-}
-```
-
-Then `go build` and run `terraform plan` in your config directory (skip `terraform init` for the overridden provider).
-
-## Releasing
-
-`.goreleaser.yml` and `terraform-registry-manifest.json` follow HashiCorp's provider scaffolding. Terraform Registry publishing is deliberately deferred: it requires making this repo public, choosing an OSI-approved license, and provisioning a GPG signing key. Until then, releases are internal only.
-
-## Design
-
-The resource model, CRUD-honesty rules, and phasing live in the design doc:
-[`docs/design/infrastructure/terraform-provider-v2/design.md`](https://github.com/sazabi/monorepo/blob/main/docs/design/infrastructure/terraform-provider-v2/design.md) in `sazabi/monorepo`. Implementation status is tracked in that design's `implementation/` directory. The design is a frozen historical artifact; this README and the code are the living documentation.
+[Apache 2.0](LICENSE)
