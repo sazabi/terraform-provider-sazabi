@@ -1,6 +1,6 @@
 # Terraform Provider for Sazabi
 
-Declare Sazabi platform configuration — projects, components, API keys, log source connections, scripts, and scheduled automations — as code, backed by the [Sazabi public API](https://api.sazabi.com).
+Declare Sazabi platform configuration — projects, components, API keys, log sources, scripts, and scheduled automations — as code, backed by the [Sazabi public API](https://api.sazabi.com).
 
 > **Source model:** The provider's Go source is maintained in Sazabi's private monorepo. This repository distributes the provider as **pre-built, signed binaries only** via the [Terraform Registry](https://registry.terraform.io/providers/sazabi/sazabi/latest). There is no publicly visible Go source here.
 
@@ -34,8 +34,8 @@ Every resource maps 1:1 to public API operations. Partial-CRUD concepts expose e
 | `sazabi_project` | resource | Full CRUD | Update is rename-only; `organization_id`/`region` force replacement. Delete rejects the org's last active project. |
 | `sazabi_component` | resource | Register / deregister | Register is an upsert by name — creating an existing name adopts it. Re-register updates the description; clearing it forces replacement. Destroy soft-deletes. |
 | `sazabi_api_key` | resource | Full CRUD | Plaintext `value` returned once at create, stored sensitive in state; empty on import. |
-| `sazabi_data_source_connection` | resource | Create / read / delete | No update endpoint: credential rotation is destroy-and-recreate. `metadata` is a sensitive `map(string)`, write-only server-side. |
-| `sazabi_data_source_stream` | resource | Create / read / delete | Async provisioning; volatile status fields not tracked. Some sources mint a one-time per-stream `public_key`. |
+| `sazabi_log_source` | resource | Create / read / delete | No update endpoint: credential rotation is destroy-and-recreate. `metadata` is a sensitive `map(string)`, write-only server-side. |
+| `sazabi_log_stream` | resource | Create / read / delete | Async provisioning; volatile status fields not tracked. Some sources mint a one-time per-stream `public_key`. |
 | `sazabi_script` | resource | Full CRUD | A durable bash script keyed by name within a project. Renaming forces replacement; destroy soft-deletes. |
 | `sazabi_automation` | resource | Create / read / update + enable/disable | Scheduled automation that runs a `sazabi_script` on a cron schedule. Name/description/schedule update in place; the script it runs is immutable (forces replacement). The public API has no delete-automation operation, so destroy **disables** the automation and removes it from state — it is not deleted server-side. |
 | `sazabi_public_key_log_forwarding` | resource | Ensure / deactivate | Upsert keyed by project; plaintext value recoverable on every apply. Destroy soft-disables. |
@@ -61,10 +61,10 @@ resource "sazabi_api_key" "ci_agent" {
   project_id = sazabi_project.production.id
 }
 
-resource "sazabi_data_source_connection" "vercel_logs" {
-  project_id       = sazabi_project.production.id
-  data_source_type = "vercel"
-  display_name     = "Production Vercel logs"
+resource "sazabi_log_source" "vercel_logs" {
+  project_id = sazabi_project.production.id
+  source     = "vercel"
+  name       = "Production Vercel logs"
 
   metadata = {
     team_id = var.vercel_team_id
@@ -89,7 +89,7 @@ resource "sazabi_automation" "nightly_status_report" {
 }
 ```
 
-Every resource supports `terraform import`. Most import by ID; `sazabi_script` imports by name (`terraform import sazabi_script.nightly_report nightly-status-report`, or `projectId/name` to pin the project). Secret-valued attributes (`sazabi_api_key.value`, connection/stream public keys) are unrecoverable on import and recorded empty — the API returns them exactly once at creation.
+Every resource supports `terraform import`. Most import by ID; `sazabi_script` imports by name (`terraform import sazabi_script.nightly_report nightly-status-report`, or `projectId/name` to pin the project). Secret-valued attributes (`sazabi_api_key.value`, log-source/log-stream public keys) are unrecoverable on import and recorded empty — the API returns them exactly once at creation.
 
 ### Breaking change: `sazabi_status_component` is now `sazabi_component`
 
